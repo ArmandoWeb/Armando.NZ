@@ -14,5 +14,5 @@
   animation: l14 1s infinite;
 }
 @keyframes l14 {
-  100%  {background-position:right,left,center,right}
+  100%  {background-position: center}
 }
