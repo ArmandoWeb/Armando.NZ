@@ -1,2 +1,165 @@
 <!DOCTYPE html>
+<html lang="en-NZ">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Homepage</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 40px; max-width: 640px; margin: 0 auto; }
+    .card { background: #f4f4f5; padding: 20px; border-radius: 12px; margin-top: 20px; }
+    .label { color: #666; font-size: 14px; }
+    .value { font-size: 22px; font-weight: 600; margin-top: 4px; }
+  </style>
+</head>
+<body>
+
+  <h1>Welcome</h1>
+  <p>This page auto-refreshes every Tuesday at 7:00pm New Zealand time.</p>
+
+  <div class="card">
+    <div class="label">Current NZ time</div>
+    <div class="value" id="nz-clock">Loading...</div>
+    <div class="label" style="margin-top: 16px;">Next refresh</div>
+    <div class="value" id="next-refresh">Loading...</div>
+    <div class="label" style="margin-top: 16px;">Countdown</div>
+    <div class="value" id="countdown">Loading...</div>
+  </div>
+
+<script>
+  // Get the current time broken into parts in NZ time
+  function getNZParts(date = new Date()) {
+    const parts = new Intl.DateTimeFormat('en-NZ', {
+      timeZone: 'Pacific/Auckland',
+      weekday: 'long',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+      hourCycle: 'h23'
+    }).formatToParts(date);
+
+    const obj = {};
+    for (const p of parts) obj[p.type] = p.value;
+
+    return {
+      weekday: obj.weekday,
+      year: Number(obj.year),
+      month: Number(obj.month),
+      day: Number(obj.day),
+      hour: Number(obj.hour),
+      minute: Number(obj.minute),
+      second: Number(obj.second)
+    };
+  }
+
+  // Convert a NZ wall-clock time (e.g. Tuesday 19:00) to a real UTC timestamp.
+  // This handles NZ daylight saving automatically.
+  function nzWallTimeToUTC(year, monthIndex, day, hour) {
+    let guess = Date.UTC(year, monthIndex, day, hour, 0, 0);
+
+    for (let i = 0; i < 5; i++) {
+      const g = getNZParts(new Date(guess));
+      const guessWall = Date.UTC(g.year, g.month - 1, g.day, g.hour, g.minute, g.second);
+      const targetWall = Date.UTC(year, monthIndex, day, hour, 0, 0);
+      const diff = targetWall - guessWall;
+      guess += diff;
+      if (diff === 0) break;
+    }
+    return guess;
+  }
+
+  function getNextTuesday7pmUTC() {
+    const nowNZ = getNZParts();
+    const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const todayNum = weekdays.indexOf(nowNZ.weekday);
+    const tuesdayNum = 2; // Tuesday
+
+    let daysUntil = (tuesdayNum - todayNum + 7) % 7;
+
+    // If it's already Tuesday after 7pm, go to next Tuesday
+    if (daysUntil === 0 && nowNZ.hour >= 19) {
+      daysUntil = 7;
+    }
+
+    const targetDate = new Date(Date.UTC(nowNZ.year, nowNZ.month - 1, nowNZ.day));
+    targetDate.setUTCDate(targetDate.getUTCDate() + daysUntil);
+
+    return nzWallTimeToUTC(
+      targetDate.getUTCFullYear(),
+      targetDate.getUTCMonth(),
+      targetDate.getUTCDate(),
+      19
+    );
+  }
+
+  let refreshTimer;
+
+  function scheduleRefresh() {
+    clearTimeout(refreshTimer);
+    const next = getNextTuesday7pmUTC();
+    const delay = next - Date.now();
+
+    refreshTimer = setTimeout(() => {
+      location.reload();
+    }, Math.max(delay, 0));
+
+    return next;
+  }
+
+  // Backup check: if the tab was asleep, catch the 7pm minute when it wakes
+  function backupCheck() {
+    const nz = getNZParts();
+    if (nz.weekday === 'Tuesday' && nz.hour === 19 && nz.minute === 0) {
+      const key = `refreshed-${nz.year}-${nz.month}-${nz.day}`;
+      if (!sessionStorage.getItem(key)) {
+        sessionStorage.setItem(key, '1');
+        location.reload();
+      }
+    }
+  }
+
+  function updateUI(nextUTC) {
+    const nz = getNZParts();
+    const now = new Date();
+
+    document.getElementById('nz-clock').textContent =
+      `${nz.weekday} ${String(nz.day).padStart(2, '0')}/${String(nz.month).padStart(2, '0')}/${nz.year} ` +
+      `${String(nz.hour).padStart(2, '0')}:${String(nz.minute).padStart(2, '0')}:${String(nz.second).padStart(2, '0')} NZ`;
+
+    const nextDate = new Date(nextUTC);
+    const nextNZ = getNZParts(nextDate);
+    document.getElementById('next-refresh').textContent =
+      `Tuesday ${String(nextNZ.day).padStart(2, '0')}/${String(nextNZ.month).padStart(2, '0')}/${nextNZ.year} at 7:00pm NZ`;
+
+    let diff = Math.max(0, nextUTC - now.getTime());
+    const days = Math.floor(diff / 86400000);
+    diff -= days * 86400000;
+    const hours = Math.floor(diff / 3600000);
+    diff -= hours * 3600000;
+    const mins = Math.floor(diff / 60000);
+    diff -= mins * 60000;
+    const secs = Math.floor(diff / 1000);
+
+    document.getElementById('countdown').textContent =
+      `${days}d ${String(hours).padStart(2, '0')}h ${String(mins).padStart(2, '0')}m ${String(secs).padStart(2, '0')}s`;
+  }
+
+  // Start
+  let nextRefresh = scheduleRefresh();
+  updateUI(nextRefresh);
+
+  setInterval(() => {
+    updateUI(nextRefresh);
+    backupCheck();
+  }, 1000);
+
+  // Re-schedule once a day in case of clock changes, just to stay in sync
+  setInterval(() => {
+    nextRefresh = scheduleRefresh();
+  }, 60 * 60 * 1000);
+</script>
+
+</body>
 </html>
